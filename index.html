@@ -2316,7 +2316,8 @@ html[dir="rtl"] .o-no, [dir="rtl"] .o-no { text-align: right; }
     return {
       names: S.names,
       departments: S.depts,
-      menu: S.menu,
+      // Firestore does not accept a list inside a list, so each drink goes up as {icon, name, note}
+      menu: Object.fromEntries(Object.entries(S.menu).map(([cat, list]) => [cat, (list || []).map(x => ({ icon: x[0] || '', name: x[1] || '', note: x[2] || '' }))])),
       drinkOptions: S.options,
       drinkMethods: S.methods,
       soundSettings: { id: S.sound.id, volume: S.sound.volume },
@@ -2328,8 +2329,12 @@ html[dir="rtl"] .o-no, [dir="rtl"] .o-no { text-align: right; }
   /** Save locally and push to the cloud. Resolves true when the cloud accepted it. */
   async function save() {
     saveLocal();
-    if (!TP.cloud || !TP.cloud.ready) return false;
-    try { await TP.cloud.saveConfig(configDoc()); return true; } catch (e) { console.error(e); TP.u.toast('تم الحفظ على هذا الجهاز فقط — تعذّر المزامنة', 'warn'); return false; }
+    if (!TP.cloud || !TP.cloud.ready) { setTimeout(() => TP.u.toast('⚠️ اتحفظ على الجهاز ده بس — لسه مش متصل', 'warn'), 1600); return false; }
+    try { await TP.cloud.saveConfig(configDoc()); return true; } catch (e) {
+      console.error(e);
+      setTimeout(() => TP.u.toast('⚠️ اتحفظ على الجهاز ده بس — مااتبعتش لباقي الأجهزة. راجع النت وجرّب تاني', 'warn'), 1600);
+      return false;
+    }
   }
 
   async function saveImages() {
@@ -2492,9 +2497,9 @@ html[dir="rtl"] .o-no, [dir="rtl"] .o-no { text-align: right; }
           TP.state.cloudReady = true;
           TP.storeApi.applyConfig(snap.data());
         } else {
-          // First run on a brand-new project: publish the defaults.
+          // An empty project: only the admin's device fills it (its names, menu and photos are the real ones)
           TP.state.cloudReady = true;
-          try { await fs.setDoc(cfgRef, TP.storeApi.configDoc()); } catch (e) { console.error(e); }
+          if (TP.admin && TP.admin.isAdmin && TP.admin.isAdmin()) { try { await fs.setDoc(cfgRef, TP.storeApi.configDoc()); } catch (e) { console.error(e); } }
         }
       }, err => { console.error(err); setConn(err && err.code === 'permission-denied' ? 'denied' : 'error'); });
 
