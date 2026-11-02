@@ -2375,11 +2375,25 @@ html[dir="rtl"] .o-no, [dir="rtl"] .o-no { text-align: right; }
   'use strict';
   let ctx = null;
 
+  /* The Arabic voice: browsers load their voices late and only speak after the first tap on the page,
+     so the voice is picked by name (Egyptian first, then any Arabic) and speech is "opened" on the first tap. */
+  let arVoice = null, spoken = false;
+  function pickVoice() {
+    try {
+      const vs = (window.speechSynthesis && speechSynthesis.getVoices()) || [];
+      const ar = vs.filter(v => /^ar([-_]|$)/i.test(v.lang));
+      arVoice = ar.find(v => /ar[-_]EG/i.test(v.lang)) || ar.find(v => /female|Salma|Hoda|Zariyah|Laila|Mariam/i.test(v.name)) || ar.find(v => /google/i.test(v.name)) || ar[0] || null;
+    } catch (e) { arVoice = null; }
+    return arVoice;
+  }
+  if ('speechSynthesis' in window) { pickVoice(); try { speechSynthesis.addEventListener('voiceschanged', pickVoice); } catch (e) { speechSynthesis.onvoiceschanged = pickVoice; } }
   function unlock() {
     try {
       ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
       if (ctx.state === 'suspended') ctx.resume();
     } catch (e) { /* audio not available */ }
+    // the first tap opens speech for the page (Chrome refuses to speak before any tap)
+    if (!spoken && 'speechSynthesis' in window) { try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); spoken = true; } catch (e) { /* ignore */ } }
   }
 
   const PATTERNS = {
@@ -2416,15 +2430,21 @@ html[dir="rtl"] .o-no, [dir="rtl"] .o-no { text-align: right; }
 
   function speak(text) {
     try {
-      if (!('speechSynthesis' in window)) return;
-      speechSynthesis.cancel();
+      if (!('speechSynthesis' in window)) return false;
+      if (speechSynthesis.speaking || speechSynthesis.pending) return true;   // still saying the last one — don't cut it off
+      const v = arVoice || pickVoice();
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'ar-EG'; u.rate = 0.88; u.volume = 1;
+      if (v) u.voice = v;
+      u.lang = v ? v.lang : 'ar-EG'; u.rate = 0.9; u.volume = 1;
+      speechSynthesis.resume();   // Chrome sometimes leaves it paused after the tab was in the background
       speechSynthesis.speak(u);
-    } catch (e) { /* ignore */ }
+      return !!v;
+    } catch (e) { return false; }
   }
+  /** is there an Arabic voice on this device? (null = the browser has no speech at all) */
+  const hasArabic = () => !('speechSynthesis' in window) ? null : !!(arVoice || pickVoice());
 
-  TP.sound = { unlock, play, speak };
+  TP.sound = { unlock, play, speak, hasArabic };
 })(window.TP = window.TP || {});
 
 </script>
@@ -3311,7 +3331,13 @@ html[dir="rtl"] .o-no, [dir="rtl"] .o-no { text-align: right; }
       if (next) { const o = S.orders.find(x => String(x.id) === next.dataset.nextId); if (o && NEXT[o.status]) setStatus(o.id, NEXT[o.status][0]); return; }
       const f = e.target.closest('[data-filter]');
       if (f) { A.filter = f.dataset.filter; return renderOrders(); }
-      if (e.target.closest('[data-action="test-sound"]')) { TP.sound.unlock(); TP.sound.play(); return toast('تم تشغيل صوت التنبيه 🔊'); }
+      if (e.target.closest('[data-action="test-sound"]')) {
+        TP.sound.unlock(); TP.sound.play();
+        // the voice that says who ordered — and a clear message when this device has no Arabic voice
+        setTimeout(() => TP.sound.speak('طلب مشروب جديد من ' + (S.names[0] || 'أحمد')), 1300);
+        const ar = TP.sound.hasArabic();
+        return toast(ar ? 'تم تشغيل صوت التنبيه والصوت اللي بيقول اسم الطالب 🔊' : ar === null ? 'المتصفح ده مبيدعمش الصوت — افتح التطبيق من Chrome' : 'الجهاز ده مفيهوش صوت عربي: Windows → الإعدادات → الوقت واللغة → الكلام → أضف العربية (مصر)، وبعدين اقفل Chrome وافتحه تاني', ar ? '' : 'warn');
+      }
       const de = e.target.closest('[data-drink-edit]');
       if (de) { const [c, i] = de.dataset.drinkEdit.split(':'); return editDrink(c, Number(i)); }
       const dd = e.target.closest('[data-drink-del]');
